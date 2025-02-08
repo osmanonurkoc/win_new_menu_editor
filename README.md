@@ -59,10 +59,10 @@ pip install PyQt5
 ---
 
 ### **Option 2: Download Standalone EXE**
-If you don’t want to run the Python script manually, you can **download the standalone executable** from the **[Releases](https://github.com/your-repo/releases)** section.
+If you don’t want to run the Python script manually, you can **download the standalone executable** from the **[Releases](https://github.com/osmanonurkoc/win_new_menu_editor/releases)** section.
 
 📥 **Steps to use the EXE version:**
-1. **Download the latest release** from **[Releases](https://github.com/your-repo/releases)**.
+1. **Download the latest release** from **[Releases](https://github.com/osmanonurkoc/win_new_menu_editor/releases)**.
 2. **Run the EXE file** (No installation required).
 3. Follow the same steps as the Python version.
 
