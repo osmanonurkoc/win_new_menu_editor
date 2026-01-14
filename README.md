@@ -1,87 +1,64 @@
-# Windows New Menu Editor
+# 📂 Windows New Menu Editor
 
-A **Python GUI tool** for managing Windows **"New"** context menu items. This application allows you to:
-- **Add custom file templates** to the right-click **"New"** menu.
-- **Remove selected default items** from the **"New"** menu.
-- **Store templates** in `%APPDATA%/CustomNewTemplates`.
-- **Open the template directory** for easy management.
+A lightweight, powerful PowerShell utility with a modern WPF interface to organize, clean, and manage the Windows "Right Click > New" context menu.
 
----
+[![Download Latest Release](https://img.shields.io/badge/Download-Latest_Release-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/osmanonurkoc/win_new_menu_editor/releases/latest)
 
-## 📌 Features
-✅ **Add custom file templates**  
-✅ **Remove selected default items**  
-✅ **Store templates for reuse**  
-✅ **Open template directory easily**  
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D4.svg)
+![PowerShell](https://img.shields.io/badge/PowerShell-v5.1%2B-5391FE.svg)
 
----
+## 📸 Overview
 
-## 🛠️ Prerequisites
+*Is your "New" menu cluttered with files you never create? Clean it up instantly.*
 
-Before running the application, ensure you have the following installed:
+This tool scans the Windows Registry (`HKCU` & `HKLM`) for all file extensions registered in the "ShellNew" subsystem. It allows you to toggle them on/off instantly or permanently delete them.
 
-- **Python 3.x**
-- **PyQt5**
+## 📸 Screenshots
 
-Install PyQt5 using the following command:
+![Application Interface](images/screenshot1.png) ![Application Interface](images/screenshot2.png)
 
-```sh
-pip install PyQt5
-```
+## ✨ Key Features
 
----
+* **🎨 Modern UI & Theme Engine:** Automatically detects your Windows System Theme (Dark/Light Mode) and adjusts the interface colors accordingly.
+* **🔇 Silent Mode:** Designed for speed. Toggles, deletions, and blocks happen instantly without annoying "Are you sure?" popups.
+* **🛡️ Persistence Lock (Block Feature):**
+  * Some apps recreate their menu items when updated or opened.
+  * **Solution:** Right-click an item and select **"Block"**. This modifies the Registry ACL (Permissions) to `Deny` access, effectively preventing the app from adding the item back.
+* **➕ Template Manager:** Easily add your own custom file templates (e.g., `.py`, `.js`, `.md`) to the menu using a simple file picker.
+* **🚀 Native PowerShell:** No external dependencies or DLLs required. Runs on standard Windows installations.
 
-## 🚀 How to Use
+## 🚀 Getting Started
 
-### **Option 1: Run the Python Script**
-1️⃣ **Run the script:**
-   ```sh
-   python script.py
-   ```
+### Prerequisites
+* **OS:** Windows 10 or Windows 11.
+* **Runtime:** PowerShell 5.1 (Pre-installed on Windows) or PowerShell 7+.
 
-2️⃣ **Adding a Template:**
-   - Click **"Add Template"**.
-   - Select a file from your computer.
-   - The file will be copied to `%APPDATA%/CustomNewTemplates` and added to the **"New"** menu.
+### Installation & Usage
 
-3️⃣ **Removing a Template:**
-   - Select a custom template from the list.
-   - Click **"Remove Selected"**.
-   - The file will be removed from the system and the **"New"** menu.
+1. Download the latest `NewMenuEditor.ps1` from the **[Releases Page](https://github.com/osmanonurkoc/NewMenuEditor/releases/latest)**.
+2. Right-click the file and select **Run with PowerShell**.
+   * *Note:* The tool requires Administrator privileges to modify HKLM keys. It will auto-request elevation if started as a standard user.
 
-4️⃣ **Managing Default Items:**
-   - Click **"Load Default Items"** to list existing **"New"** menu entries.
-   - Select an item and click **"Remove Selected Default Item"** to delete it from the registry.
+## ⚙️ How It Works
 
-5️⃣ **Opening the Template Directory:**
-   - Click **"Open Template Directory"** to access the stored template files.
+### Registry Scanning
+The tool looks for `ShellNew` keys in:
+* `HKEY_CLASSES_ROOT` (Merged view)
+* `HKEY_CURRENT_USER\Software\Classes`
+* `HKEY_LOCAL_MACHINE\Software\Classes`
 
----
+### Disabling Items
+When you toggle an item **OFF**, the tool renames the registry key from `ShellNew` to `_ShellNew_Disabled`. This preserves the data while hiding it from Windows Explorer. Toggling it **ON** reverses this process.
 
-### **Option 2: Download Standalone EXE**
-If you don’t want to run the Python script manually, you can **download the standalone executable** from the **[Releases](https://github.com/osmanonurkoc/win_new_menu_editor/releases)** section.
+### Blocking Items
+The "Block" feature creates an empty key and sets the **Access Control List (ACL)** to `Deny Everyone`. This creates a "dead zone" in the registry that installers cannot overwrite.
 
-📥 **Steps to use the EXE version:**
-1. **Download the latest release** from **[Releases](https://github.com/osmanonurkoc/win_new_menu_editor/releases)**.
-2. **Run the EXE file** (No installation required).
-3. Follow the same steps as the Python version.
+## ⚠️ Disclaimer
+This tool modifies the Windows Registry. While it includes safety checks (renaming instead of deleting by default), **use it at your own risk**. 
+
+## 📄 License
+This project is licensed under the [MIT License](LICENSE).
 
 ---
-
-## ⚠️ Important Notes
-🔹 Removing default items **only removes them from the context menu**, not from the system.  
-🔹 This tool modifies the **Windows Registry**. **Run with administrative privileges** if necessary.  
-🔹 Restart **Windows Explorer (`explorer.exe`)** after making changes to apply them.  
-
----
-
-## 📜 License
-This project is **open-source** and licensed under the **MIT License**.
-
----
-
-## 👥 Contributions
-💡 Feel free to submit **issues** or **pull requests** to improve this project! 🚀  
-
-## Reddit check
-username:kawai_pasha
+*Created by [@osmanonurkoc](https://github.com/osmanonurkoc)*
