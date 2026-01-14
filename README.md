@@ -16,7 +16,10 @@ This tool scans the Windows Registry (`HKCU` & `HKLM`) for all file extensions r
 
 ## 📸 Screenshots
 
-![Application Interface](images/screenshot1.png) ![Application Interface](images/screenshot2.png)
+<p align="center">
+  <img src="images/screenshot1.png" width="45%" />
+  <img src="images/screenshot2.png" width="45%" />
+</p>
 
 ## ✨ Key Features
 
