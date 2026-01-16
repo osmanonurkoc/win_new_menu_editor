@@ -283,14 +283,14 @@ if ($iconBase64 -ne "") {
 
 $HeaderArea.Add_MouseDown({ Start-Process "https://www.osmanonurkoc.com" })
 # =============================================================================
-# 7. REGISTRY SCANNER (CORE LOGIC) - FIXED FOR NESTED OFFICE KEYS & CROSS-HIVE
+# 7. REGISTRY SCANNER (CORE LOGIC) - WITH MRTCACHE EXCEPTION
 # =============================================================================
 function Get-RegistryItems-Fast {
     $items = @()
     $HKCU = [Microsoft.Win32.Registry]::CurrentUser
     $HKLM = [Microsoft.Win32.Registry]::LocalMachine
 
-    # Targets to scan (with Cross-Hive support)
+    # --- PART 1: STANDARD SCAN (Classic & Office) ---
     $targets = @(
         @{ Root=$HKCU; OtherRoot=$HKLM; Name="HKCU"; Path="Software\Classes"; PSDrive="HKCU:"; OtherPSDrive="HKLM:" },
         @{ Root=$HKLM; OtherRoot=$HKCU; Name="HKLM"; Path="Software\Classes"; PSDrive="HKLM:"; OtherPSDrive="HKCU:" }
@@ -300,92 +300,44 @@ function Get-RegistryItems-Fast {
         try {
             $classesKey = $t.Root.OpenSubKey($t.Path)
             if ($classesKey -eq $null) { continue }
-
             $subKeys = $classesKey.GetSubKeyNames()
             foreach ($keyName in $subKeys) {
-                # Get only extensions starting with a dot (.txt, .docx, .xlsx etc.)
                 if (-not $keyName.StartsWith(".")) { continue }
-
                 try {
                     $extKey = $classesKey.OpenSubKey($keyName)
                     if ($extKey) {
-                        # -------------------------------------------------------
-                        # SCENARIO A: ShellNew is directly under the extension (like .txt)
-                        # -------------------------------------------------------
+                        # Scenario A: Direct ShellNew
                         $sn = $extKey.OpenSubKey("ShellNew");
-                        if ($sn) {
-                            $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\ShellNew"; Active=$true }
-                            $sn.Close()
-                        }
+                        if ($sn) { $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\ShellNew"; Active=$true }; $sn.Close() }
                         $snd = $extKey.OpenSubKey("_ShellNew_Disabled");
-                        if ($snd) {
-                            $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\_ShellNew_Disabled"; Active=$false }
-                            $snd.Close()
-                        }
+                        if ($snd) { $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\_ShellNew_Disabled"; Active=$false }; $snd.Close() }
 
-                        # -------------------------------------------------------
-                        # SCENARIO B: Extension points to a ProgID (Default Value)
-                        # -------------------------------------------------------
+                        # Scenario B: ProgID Redirect
                         $progID = $extKey.GetValue("")
                         if ($progID) {
-                            # Find ProgID (with Cross-Hive check)
-                            $progKey = $classesKey.OpenSubKey($progID)
-                            $foundHiveStr = $t.PSDrive
-                            $foundHiveName = $t.Name
-
+                            $progKey = $classesKey.OpenSubKey($progID); $foundHiveStr = $t.PSDrive; $foundHiveName = $t.Name
                             if ($progKey -eq $null) {
                                 $otherClasses = $t.OtherRoot.OpenSubKey("Software\Classes")
-                                if ($otherClasses) {
-                                    $progKey = $otherClasses.OpenSubKey($progID)
-                                    if ($progKey) {
-                                        $foundHiveStr = $t.OtherPSDrive
-                                        $foundHiveName = $t.OtherPSDrive.Replace(":","")
-                                    }
-                                    $otherClasses.Close()
-                                }
+                                if ($otherClasses) { $progKey = $otherClasses.OpenSubKey($progID); if($progKey){$foundHiveStr=$t.OtherPSDrive; $foundHiveName=$t.OtherPSDrive.Replace(":","")}; $otherClasses.Close() }
                             }
-
                             if ($progKey) {
-                                $psn = $progKey.OpenSubKey("ShellNew");
-                                if ($psn) {
-                                    $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\ShellNew"; Active=$true }
-                                    $psn.Close()
-                                }
-                                $psnd = $progKey.OpenSubKey("_ShellNew_Disabled");
-                                if ($psnd) {
-                                    $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\_ShellNew_Disabled"; Active=$false }
-                                    $psnd.Close()
-                                }
+                                $psn = $progKey.OpenSubKey("ShellNew"); if ($psn) { $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\ShellNew"; Active=$true }; $psn.Close() }
+                                $psnd = $progKey.OpenSubKey("_ShellNew_Disabled"); if ($psnd) { $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\_ShellNew_Disabled"; Active=$false }; $psnd.Close() }
                                 $progKey.Close()
                             }
                         }
 
-                        # -------------------------------------------------------
-                        # SCENARIO C (NEW): Nested Subkey (Excel.Sheet.12 etc.)
-                        # Source: [HKEY_CLASSES_ROOT\.xlsx\Excel.Sheet.12\ShellNew]
-                        # -------------------------------------------------------
+                        # Scenario C: Nested Subkeys
                         $innerKeys = $extKey.GetSubKeyNames()
                         foreach ($innerName in $innerKeys) {
-                            # Skip standard system folders, look only for ProgID-like ones
                             if ($innerName -match "^Shell" -or $innerName -match "^OpenWith" -or $innerName -eq "PersistentHandler") { continue }
-
                             $nestedKey = $extKey.OpenSubKey($innerName)
                             if ($nestedKey) {
-                                # Is there ShellNew inside this subkey?
-                                $nsn = $nestedKey.OpenSubKey("ShellNew")
-                                if ($nsn) {
-                                    $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\ShellNew"; Active=$true }
-                                    $nsn.Close()
-                                }
-                                $nsnd = $nestedKey.OpenSubKey("_ShellNew_Disabled")
-                                if ($nsnd) {
-                                    $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\_ShellNew_Disabled"; Active=$false }
-                                    $nsnd.Close()
-                                }
+                                $nsn = $nestedKey.OpenSubKey("ShellNew"); if ($nsn) { $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\ShellNew"; Active=$true }; $nsn.Close() }
+                                $nsnd = $nestedKey.OpenSubKey("_ShellNew_Disabled"); if ($nsnd) { $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\_ShellNew_Disabled"; Active=$false }; $nsnd.Close() }
                                 $nestedKey.Close()
                             }
                         }
-
                         $extKey.Close()
                     }
                 } catch {}
@@ -393,6 +345,43 @@ function Get-RegistryItems-Fast {
             $classesKey.Close()
         } catch {}
     }
+
+    # --- PART 2: PAINT MRTCACHE EXCEPTION (Dynamic Search) ---
+    # This applies the logic found in your "bmp.reg" file.
+    # It dynamically searches for the Paint key within MrtCache.
+
+    $mrtPath = "HKCU:\Software\Classes\Local Settings\MrtCache"
+    if (Test-Path $mrtPath) {
+        # Search recursively for packages containing "Microsoft.Paint"
+        $paintKeys = Get-ChildItem -Path $mrtPath -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "Microsoft.Paint" }
+
+        foreach ($key in $paintKeys) {
+            # Read properties (Values) of this key
+            $props = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+
+            # Look for the specific property name containing "ShellNewDisplayName_Bmp"
+            # Example: @{Microsoft.Paint_...?ms-resource://...ShellNewDisplayName_Bmp}
+            foreach ($propName in $props.PSObject.Properties.Name) {
+                if ($propName -match "ShellNewDisplayName_Bmp") {
+
+                    $val = $props.$propName
+                    $isActive = -not [string]::IsNullOrEmpty($val) # Active if not empty
+
+                    # Add to list as "Exception" type.
+                    # We store the "Value Name" in the Path field (separated by |)
+                    # because we need it for the toggle logic later.
+                    $items += [PSCustomObject]@{
+                        Ext = ".bmp (Modern Paint)";
+                        Hive = "MrtCache";
+                        Type = "Exception";
+                        Path = "$($key.PSPath)|$propName";
+                        Active = $isActive
+                    }
+                }
+            }
+        }
+    }
+
     return $items | Sort-Object Ext | Select-Object -Unique Ext, Hive, Type, Path, Active
 }
 
@@ -441,7 +430,13 @@ function Draw-List {
             $pathToDelete = $this.Tag
             # Silent execution - No MessageBox
             try {
-                Remove-Item -Path $pathToDelete -Recurse -Force
+                # If it's a pipe-separated path (Exception), we only delete the value, not key
+                if ($pathToDelete -match "\|") {
+                    $parts = $pathToDelete -split "\|"
+                    Remove-ItemProperty -Path $parts[0] -Name $parts[1] -Force -ErrorAction SilentlyContinue
+                } else {
+                    Remove-Item -Path $pathToDelete -Recurse -Force
+                }
                 Draw-List
             } catch {
                 [System.Windows.Forms.MessageBox]::Show("Error: " + $_.Exception.Message)
@@ -456,7 +451,9 @@ function Draw-List {
         $menuBlock.ToolTip = "Locks the key permissions to stop apps from recreating this entry."
         $menuBlock.Add_Click({
             $pathToBlock = $this.Tag
-            # Silent execution
+            # For Exceptions, we block the parent key
+            if ($pathToBlock -match "\|") { $pathToBlock = ($pathToBlock -split "\|")[0] }
+
             if (Block-Key $pathToBlock) {
                 Draw-List
             } else {
@@ -479,19 +476,56 @@ function Draw-List {
         [void]$spText.Children.Add($borderBadge)
 
         # --- Toggle Switch ---
-        $cb = New-Object System.Windows.Controls.CheckBox; $cb.Style = $window.Resources["ToggleSwitchStyle"]; $cb.IsChecked = $item.Active; $cb.Tag = $item.Path; $cb.Content = if($item.Active){"On"}else{"Off"}; $cb.Foreground = $c_Fg; $cb.Opacity = 0.8; $cb.FontSize = 12
+        $cb = New-Object System.Windows.Controls.CheckBox;
+        $cb.Style = $window.Resources["ToggleSwitchStyle"];
+        $cb.IsChecked = $item.Active;
+        $cb.Tag = $item; # <--- CHANGED: Storing full object to check .Type
+        $cb.Content = if($item.Active){"On"}else{"Off"};
+        $cb.Foreground = $c_Fg; $cb.Opacity = 0.8; $cb.FontSize = 12
+
         $cb.Add_Click({
-            $path = $this.Tag; $isOn = $this.IsChecked; $this.Content = if($isOn){"On"}else{"Off"}
-            $parent = Split-Path -Parent $path
-            if ($isOn) {
-                # Enable: Rename disabled key back to ShellNew
-                $target = "$parent\ShellNew"
-                if (-not (Test-Path $target)) { Rename-Item -Path $path -NewName "ShellNew" -Force; $this.Tag = $target }
-            } else {
-                # Disable: Rename ShellNew to _ShellNew_Disabled
-                $target = "$parent\_ShellNew_Disabled"
-                if (Test-Path $target) { Remove-Item $target -Recurse -Force }
-                try { Rename-Item -Path $path -NewName "_ShellNew_Disabled" -Force; $this.Tag = $target } catch { Remove-Item -Path $path -Recurse -Force }
+            $itm = $this.Tag
+            $isOn = $this.IsChecked
+            $this.Content = if($isOn){"On"}else{"Off"}
+
+            if ($itm.Type -eq "Exception") {
+                # --- SPECIAL CASE: MRTCACHE (Modern Apps) ---
+                # Logic: Toggle the registry value instead of renaming folders.
+                # Path format: "RegistryKeyPath|ValueName"
+                $parts = $itm.Path -split "\|"
+                $regKey = $parts[0]
+                $valName = $parts[1]
+
+                if ($isOn) {
+                    # Enable: Set value to "Bitmap image"
+                    Set-ItemProperty -Path $regKey -Name $valName -Value "Bitmap image" -Force
+                } else {
+                    # Disable: Clear the value ("")
+                    Set-ItemProperty -Path $regKey -Name $valName -Value "" -Force
+                }
+            }
+            else {
+                # --- STANDARD CASE: CLASSIC SHELLNEW ---
+                # Logic: Rename "ShellNew" folder to "_ShellNew_Disabled"
+                $parent = Split-Path -Parent $itm.Path
+                if ($isOn) {
+                    # Enable
+                    $target = "$parent\ShellNew"
+                    if (-not (Test-Path $target)) {
+                        Rename-Item -Path $itm.Path -NewName "ShellNew" -Force
+                        $itm.Path = $target
+                    }
+                } else {
+                    # Disable
+                    $target = "$parent\_ShellNew_Disabled"
+                    if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+                    try {
+                        Rename-Item -Path $itm.Path -NewName "_ShellNew_Disabled" -Force
+                        $itm.Path = $target
+                    } catch {
+                        Remove-Item -Path $itm.Path -Recurse -Force
+                    }
+                }
             }
         })
         [void]$grid.Children.Add($cb); [System.Windows.Controls.Grid]::SetColumn($cb, 1); [void]$ListPanel.Children.Add($grid)
