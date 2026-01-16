@@ -38,8 +38,12 @@ This tool scans the Windows Registry (`HKCU` & `HKLM`) for all file extensions r
 * **Runtime:** PowerShell 5.1 (Pre-installed on Windows) or PowerShell 7+.
 
 ### Installation & Usage
+#Exe:
+1. Download the latest `NewMenuEditor.exe` from the **[Releases Page](https://github.com/osmanonurkoc/win_new_menu_editor/releases/latest)**.
+2. Right-click aand **Run as Administrator**.
 
-1. Download the latest `NewMenuEditor.ps1` from the **[Releases Page](https://github.com/osmanonurkoc/NewMenuEditor/releases/latest)**.
+#PS1:
+1. Download the latest `NewMenuEditor.ps1` from the **[Source Code](https://github.com/osmanonurkoc/win_new_menu_editor/archive/refs/heads/main.zip)**.
 2. Right-click the file and select **Run with PowerShell**.
    * *Note:* The tool requires Administrator privileges to modify HKLM keys. It will auto-request elevation if started as a standard user.
 
