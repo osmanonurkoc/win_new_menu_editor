@@ -282,43 +282,110 @@ if ($iconBase64 -ne "") {
 }
 
 $HeaderArea.Add_MouseDown({ Start-Process "https://www.osmanonurkoc.com" })
-
 # =============================================================================
-# 7. REGISTRY SCANNER (CORE LOGIC)
+# 7. REGISTRY SCANNER (CORE LOGIC) - FIXED FOR NESTED OFFICE KEYS & CROSS-HIVE
 # =============================================================================
 function Get-RegistryItems-Fast {
     $items = @()
     $HKCU = [Microsoft.Win32.Registry]::CurrentUser
     $HKLM = [Microsoft.Win32.Registry]::LocalMachine
+
+    # Targets to scan (with Cross-Hive support)
     $targets = @(
-        @{ Root=$HKCU; Name="HKCU"; Path="Software\Classes"; PSDrive="HKCU:" },
-        @{ Root=$HKLM; Name="HKLM"; Path="Software\Classes"; PSDrive="HKLM:" }
+        @{ Root=$HKCU; OtherRoot=$HKLM; Name="HKCU"; Path="Software\Classes"; PSDrive="HKCU:"; OtherPSDrive="HKLM:" },
+        @{ Root=$HKLM; OtherRoot=$HKCU; Name="HKLM"; Path="Software\Classes"; PSDrive="HKLM:"; OtherPSDrive="HKCU:" }
     )
+
     foreach ($t in $targets) {
         try {
             $classesKey = $t.Root.OpenSubKey($t.Path)
             if ($classesKey -eq $null) { continue }
+
             $subKeys = $classesKey.GetSubKeyNames()
             foreach ($keyName in $subKeys) {
-                # Look for file extensions (starting with dot)
+                # Get only extensions starting with a dot (.txt, .docx, .xlsx etc.)
                 if (-not $keyName.StartsWith(".")) { continue }
+
                 try {
                     $extKey = $classesKey.OpenSubKey($keyName)
                     if ($extKey) {
-                        # Scenario A: Extension directly has ShellNew
-                        $sn = $extKey.OpenSubKey("ShellNew"); if ($sn) { $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\ShellNew"; Active=$true }; $sn.Close() }
-                        $snd = $extKey.OpenSubKey("_ShellNew_Disabled"); if ($snd) { $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\_ShellNew_Disabled"; Active=$false }; $snd.Close() }
+                        # -------------------------------------------------------
+                        # SCENARIO A: ShellNew is directly under the extension (like .txt)
+                        # -------------------------------------------------------
+                        $sn = $extKey.OpenSubKey("ShellNew");
+                        if ($sn) {
+                            $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\ShellNew"; Active=$true }
+                            $sn.Close()
+                        }
+                        $snd = $extKey.OpenSubKey("_ShellNew_Disabled");
+                        if ($snd) {
+                            $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\_ShellNew_Disabled"; Active=$false }
+                            $snd.Close()
+                        }
 
-                        # Scenario B: Extension points to a ProgID
+                        # -------------------------------------------------------
+                        # SCENARIO B: Extension points to a ProgID (Default Value)
+                        # -------------------------------------------------------
                         $progID = $extKey.GetValue("")
                         if ($progID) {
+                            # Find ProgID (with Cross-Hive check)
                             $progKey = $classesKey.OpenSubKey($progID)
+                            $foundHiveStr = $t.PSDrive
+                            $foundHiveName = $t.Name
+
+                            if ($progKey -eq $null) {
+                                $otherClasses = $t.OtherRoot.OpenSubKey("Software\Classes")
+                                if ($otherClasses) {
+                                    $progKey = $otherClasses.OpenSubKey($progID)
+                                    if ($progKey) {
+                                        $foundHiveStr = $t.OtherPSDrive
+                                        $foundHiveName = $t.OtherPSDrive.Replace(":","")
+                                    }
+                                    $otherClasses.Close()
+                                }
+                            }
+
                             if ($progKey) {
-                                $psn = $progKey.OpenSubKey("ShellNew"); if ($psn) { $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$t.Name; Type="ProgID"; Path="$($t.PSDrive)\Software\Classes\$progID\ShellNew"; Active=$true }; $psn.Close() }
-                                $psnd = $progKey.OpenSubKey("_ShellNew_Disabled"); if ($psnd) { $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$t.Name; Type="ProgID"; Path="$($t.PSDrive)\Software\Classes\$progID\_ShellNew_Disabled"; Active=$false }; $psnd.Close() }
+                                $psn = $progKey.OpenSubKey("ShellNew");
+                                if ($psn) {
+                                    $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\ShellNew"; Active=$true }
+                                    $psn.Close()
+                                }
+                                $psnd = $progKey.OpenSubKey("_ShellNew_Disabled");
+                                if ($psnd) {
+                                    $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\_ShellNew_Disabled"; Active=$false }
+                                    $psnd.Close()
+                                }
                                 $progKey.Close()
                             }
                         }
+
+                        # -------------------------------------------------------
+                        # SCENARIO C (NEW): Nested Subkey (Excel.Sheet.12 etc.)
+                        # Source: [HKEY_CLASSES_ROOT\.xlsx\Excel.Sheet.12\ShellNew]
+                        # -------------------------------------------------------
+                        $innerKeys = $extKey.GetSubKeyNames()
+                        foreach ($innerName in $innerKeys) {
+                            # Skip standard system folders, look only for ProgID-like ones
+                            if ($innerName -match "^Shell" -or $innerName -match "^OpenWith" -or $innerName -eq "PersistentHandler") { continue }
+
+                            $nestedKey = $extKey.OpenSubKey($innerName)
+                            if ($nestedKey) {
+                                # Is there ShellNew inside this subkey?
+                                $nsn = $nestedKey.OpenSubKey("ShellNew")
+                                if ($nsn) {
+                                    $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\ShellNew"; Active=$true }
+                                    $nsn.Close()
+                                }
+                                $nsnd = $nestedKey.OpenSubKey("_ShellNew_Disabled")
+                                if ($nsnd) {
+                                    $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\_ShellNew_Disabled"; Active=$false }
+                                    $nsnd.Close()
+                                }
+                                $nestedKey.Close()
+                            }
+                        }
+
                         $extKey.Close()
                     }
                 } catch {}
