@@ -283,7 +283,7 @@ if ($iconBase64 -ne "") {
 
 $HeaderArea.Add_MouseDown({ Start-Process "https://www.osmanonurkoc.com" })
 # =============================================================================
-# 7. REGISTRY SCANNER (CORE LOGIC) - WITH MRTCACHE EXCEPTION
+# 7. REGISTRY SCANNER (CORE LOGIC) - WITH MRTCACHE EXCEPTION & EMPTY KEY FILTER
 # =============================================================================
 function Get-RegistryItems-Fast {
     $items = @()
@@ -307,34 +307,83 @@ function Get-RegistryItems-Fast {
                     $extKey = $classesKey.OpenSubKey($keyName)
                     if ($extKey) {
                         # Scenario A: Direct ShellNew
-                        $sn = $extKey.OpenSubKey("ShellNew");
-                        if ($sn) { $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\ShellNew"; Active=$true }; $sn.Close() }
-                        $snd = $extKey.OpenSubKey("_ShellNew_Disabled");
-                        if ($snd) { $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\_ShellNew_Disabled"; Active=$false }; $snd.Close() }
+                        $sn = $extKey.OpenSubKey("ShellNew")
+                        if ($sn) {
+                            # Check if the key actually contains registry values (e.g., NullFile, FileName)
+                            if ($sn.GetValueNames().Count -gt 0) {
+                                $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\ShellNew"; Active=$true }
+                            }
+                            $sn.Close()
+                        }
+                        $snd = $extKey.OpenSubKey("_ShellNew_Disabled")
+                        if ($snd) {
+                            if ($snd.GetValueNames().Count -gt 0) {
+                                $items += [PSCustomObject]@{ Ext=$keyName; Hive=$t.Name; Type="Ext"; Path="$($t.PSDrive)\Software\Classes\$keyName\_ShellNew_Disabled"; Active=$false }
+                            }
+                            $snd.Close()
+                        }
 
                         # Scenario B: ProgID Redirect
                         $progID = $extKey.GetValue("")
                         if ($progID) {
-                            $progKey = $classesKey.OpenSubKey($progID); $foundHiveStr = $t.PSDrive; $foundHiveName = $t.Name
+                            $progKey = $classesKey.OpenSubKey($progID)
+                            $foundHiveStr = $t.PSDrive
+                            $foundHiveName = $t.Name
                             if ($progKey -eq $null) {
                                 $otherClasses = $t.OtherRoot.OpenSubKey("Software\Classes")
-                                if ($otherClasses) { $progKey = $otherClasses.OpenSubKey($progID); if($progKey){$foundHiveStr=$t.OtherPSDrive; $foundHiveName=$t.OtherPSDrive.Replace(":","")}; $otherClasses.Close() }
+                                if ($otherClasses) {
+                                    $progKey = $otherClasses.OpenSubKey($progID)
+                                    if ($progKey) {
+                                        $foundHiveStr = $t.OtherPSDrive
+                                        $foundHiveName = $t.OtherPSDrive.Replace(":","")
+                                    }
+                                    $otherClasses.Close()
+                                }
                             }
                             if ($progKey) {
-                                $psn = $progKey.OpenSubKey("ShellNew"); if ($psn) { $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\ShellNew"; Active=$true }; $psn.Close() }
-                                $psnd = $progKey.OpenSubKey("_ShellNew_Disabled"); if ($psnd) { $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\_ShellNew_Disabled"; Active=$false }; $psnd.Close() }
+                                $psn = $progKey.OpenSubKey("ShellNew")
+                                if ($psn) {
+                                    if ($psn.GetValueNames().Count -gt 0) {
+                                        $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\ShellNew"; Active=$true }
+                                    }
+                                    $psn.Close()
+                                }
+                                $psnd = $progKey.OpenSubKey("_ShellNew_Disabled")
+                                if ($psnd) {
+                                    if ($psnd.GetValueNames().Count -gt 0) {
+                                        $items += [PSCustomObject]@{ Ext="$keyName ($progID)"; Hive=$foundHiveName; Type="ProgID"; Path="$foundHiveStr\Software\Classes\$progID\_ShellNew_Disabled"; Active=$false }
+                                    }
+                                    $psnd.Close()
+                                }
                                 $progKey.Close()
                             }
                         }
 
-                        # Scenario C: Nested Subkeys
+                        # Scenario C: Nested Subkeys (Filtered for Office architecture)
                         $innerKeys = $extKey.GetSubKeyNames()
                         foreach ($innerName in $innerKeys) {
                             if ($innerName -match "^Shell" -or $innerName -match "^OpenWith" -or $innerName -eq "PersistentHandler") { continue }
+
+                            # ONLY scan the nested key if it matches the extension's default ProgID.
+                            # This strictly targets documents like Office without fetching garbage keys.
+                            if ($progID -and $innerName -ne $progID) { continue }
+
                             $nestedKey = $extKey.OpenSubKey($innerName)
                             if ($nestedKey) {
-                                $nsn = $nestedKey.OpenSubKey("ShellNew"); if ($nsn) { $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\ShellNew"; Active=$true }; $nsn.Close() }
-                                $nsnd = $nestedKey.OpenSubKey("_ShellNew_Disabled"); if ($nsnd) { $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\_ShellNew_Disabled"; Active=$false }; $nsnd.Close() }
+                                $nsn = $nestedKey.OpenSubKey("ShellNew")
+                                if ($nsn) {
+                                    if ($nsn.GetValueNames().Count -gt 0) {
+                                        $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\ShellNew"; Active=$true }
+                                    }
+                                    $nsn.Close()
+                                }
+                                $nsnd = $nestedKey.OpenSubKey("_ShellNew_Disabled")
+                                if ($nsnd) {
+                                    if ($nsnd.GetValueNames().Count -gt 0) {
+                                        $items += [PSCustomObject]@{ Ext="$keyName ($innerName)"; Hive=$t.Name; Type="Nested"; Path="$($t.PSDrive)\Software\Classes\$keyName\$innerName\_ShellNew_Disabled"; Active=$false }
+                                    }
+                                    $nsnd.Close()
+                                }
                                 $nestedKey.Close()
                             }
                         }
@@ -347,34 +396,21 @@ function Get-RegistryItems-Fast {
     }
 
     # --- PART 2: PAINT MRTCACHE EXCEPTION (Dynamic Search) ---
-    # This applies the logic found in your "bmp.reg" file.
-    # It dynamically searches for the Paint key within MrtCache.
-
     $mrtPath = "HKCU:\Software\Classes\Local Settings\MrtCache"
     if (Test-Path $mrtPath) {
-        # Search recursively for packages containing "Microsoft.Paint"
         $paintKeys = Get-ChildItem -Path $mrtPath -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "Microsoft.Paint" }
 
         foreach ($key in $paintKeys) {
-            # Read properties (Values) of this key
             $props = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
-
-            # Look for the specific property name containing "ShellNewDisplayName_Bmp"
-            # Example: @{Microsoft.Paint_...?ms-resource://...ShellNewDisplayName_Bmp}
             foreach ($propName in $props.PSObject.Properties.Name) {
                 if ($propName -match "ShellNewDisplayName_Bmp") {
-
                     $val = $props.$propName
-                    $isActive = -not [string]::IsNullOrEmpty($val) # Active if not empty
-
-                    # Add to list as "Exception" type.
-                    # We store the "Value Name" in the Path field (separated by |)
-                    # because we need it for the toggle logic later.
+                    $isActive = -not [string]::IsNullOrEmpty($val)
                     $items += [PSCustomObject]@{
-                        Ext = ".bmp (Modern Paint)";
-                        Hive = "MrtCache";
-                        Type = "Exception";
-                        Path = "$($key.PSPath)|$propName";
+                        Ext = ".bmp (Modern Paint)"
+                        Hive = "MrtCache"
+                        Type = "Exception"
+                        Path = "$($key.PSPath)|$propName"
                         Active = $isActive
                     }
                 }
